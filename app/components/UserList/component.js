@@ -15,7 +15,7 @@ import {
   ListView
 } from 'react-native';
 import Color from '../../stylesheets/Pallete';
-import UserItem from '../UserItem';
+import UserItem from './Item';
 
 const styles = StyleSheet.create({
   UserListContainer: {
@@ -39,7 +39,8 @@ class UserList extends Component {
     let array = [];
 
     let users = this.props.users;
-    users.forEach(user => array.push(user.user.name))
+    console.log(users);
+    users.forEach(user => array.push(user))
 
     dataSource = ds.cloneWithRows(array);
 
@@ -55,8 +56,4 @@ class UserList extends Component {
   }
 }
 
-export default createContainer(params=>{
-  return {
-    users: Meteor.collection('users').find({}),
-  };
-}, UserList)
+export default UserList;

@@ -21,9 +21,9 @@ function subscribeForData() {
 
 function subscribeFor(collectionName) {
   const credentials = {
-    meetingId: '183f0bf3a0982a127bdb8161e0c44eb696b3e75c-1469619225470',
-    requesterUserId: 'ogo3wk4leiys',
-    requesterToken: 'alcmcsqmlwuy',
+    meetingId: '183f0bf3a0982a127bdb8161e0c44eb696b3e75c-1470051650040',
+    requesterUserId: 'emlsq9q2spti',
+    requesterToken: 'wvus4kv3ujdj',
   };
   return new Promise((resolve, reject) => {
     Meteor.subscribe(collectionName, credentials, {
