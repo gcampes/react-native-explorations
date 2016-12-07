@@ -20,7 +20,7 @@ import UserList from '../UserList/container';
 import styles from './styles';
 import { subscribeToCollections } from './service';
 
-Meteor.connect('ws://192.168.56.101/html5client/websocket');
+Meteor.connect('ws://192.168.56.102/html5client/websocket');
 
 class App extends Component {
   constructor(props) {

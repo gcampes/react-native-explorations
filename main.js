@@ -11,10 +11,6 @@ import {
   ListView,
 } from 'react-native';
 
-import App from './app/components/App';
-import io from 'socket.io-client/socket.io';
-
-const socket = io.connect('https://react-native-webrtc.herokuapp.com', {transports: ['websocket']});
 
 import {
   RTCPeerConnection,
@@ -26,12 +22,18 @@ import {
   getUserMedia,
 } from 'react-native-webrtc';
 
+import App from './app/components/App';
+
 const configuration = {"iceServers": [{"url": "stun:stun.l.google.com:19302"}]};
 
-const pcPeers = {};
+let pcPeers = {};
 let localStream;
 
-function getLocalStream(isFront, callback) {
+const logError = (error) => {
+  console.log("logError", error);
+}
+
+const getLocalStream = (isFront, callback) => {
   MediaStreamTrack.getSources(sourceInfos => {
     console.log(sourceInfos);
     let videoSourceId;
@@ -42,9 +44,15 @@ function getLocalStream(isFront, callback) {
       }
     }
     getUserMedia({
-      "audio": true,
-      "video": {
-        optional: [{sourceId: videoSourceId}]
+      audio: true,
+      video: {
+        mandatory: {
+          minWidth: 500, // Provide your own width, height and frame rate here
+          minHeight: 300,
+          minFrameRate: 30
+        },
+        facingMode: (isFront ? "user" : "environment"),
+        optional: [{ sourceId: sourceInfos.id }]
       }
     }, function (stream) {
       console.log('dddd', stream);
@@ -53,40 +61,75 @@ function getLocalStream(isFront, callback) {
   });
 }
 
-function join(roomID) {
-  socket.emit('join', roomID, function(socketIds){
-    console.log('join', socketIds);
-    for (const i in socketIds) {
-      const socketId = socketIds[i];
-      createPC(socketId, true);
-    }
-  });
-}
-
-function createPC(socketId, isOffer) {
+let candidates = "";
+let candidateTimeout;
+let connected = false;
+const createPC = (socket, socketId, isOffer) => {
   const pc = new RTCPeerConnection(configuration);
+  console.log(`1`);
   pcPeers[socketId] = pc;
+  console.log(`2`);
 
   pc.onicecandidate = function (event) {
     console.log('onicecandidate', event.candidate);
+    console.log(pc.localDescription);
     if (event.candidate) {
-      socket.emit('exchange', {'to': socketId, 'candidate': event.candidate });
+      candidates = candidates + `a=${event.candidate.candidate}\r\n`;
     }
+    clearTimeout(candidateTimeout);
+    candidateTimeout = setTimeout(iceCompleted, 1000);
   };
 
+  function iceCompleted() {
+    const message = {
+      "jsonrpc": "2.0",
+      "method": "verto.invite",
+      "params": {
+        "sdp": pc.localDescription.sdp + candidates,
+        "dialogParams": {
+          "useVideo": true,
+          "useStereo": false,
+          "screenShare": false,
+          "useCamera": "default",
+          "useMic": "default",
+          "useSpeak": "default",
+          "tag": "deskshareVideo",
+          "localTag": null,
+          "login": "bbbuser",
+          "videoParams": {
+            "minFrameRate": 15
+          },
+        "destination_number": "71234-DESKSHARE",
+        "caller_id_name": "Test",
+        "caller_id_number": "a@b.c",
+        "outgoingBandwidth": 1302,
+        "incomingBandwidth": 630,
+        "dedEnc": false,
+        "mirrorInput": false,
+        "callID": `xubirabirovovski-${Date.now()}`,
+        "remote_caller_id_name": "Outbound Call",
+        "remote_caller_id_number": "71234-DESKSHARE"
+        },
+        "sessid": `native-${Date.now()}`
+      },
+      "id": 11
+    };
+    socket.send(JSON.stringify(message));
+  }
+
   function createOffer() {
+    console.log('Starting createOffer');
     pc.createOffer(function(desc) {
       console.log('createOffer', desc);
       pc.setLocalDescription(desc, function () {
         console.log('setLocalDescription', pc.localDescription);
-        socket.emit('exchange', {'to': socketId, 'sdp': pc.localDescription });
       }, logError);
     }, logError);
   }
 
   pc.onnegotiationneeded = function () {
-    console.log('onnegotiationneeded');
-    if (isOffer) {
+    console.log('onnegotiationneeded', isOffer);
+    if (isOffer && !connected) {
       createOffer();
     }
   }
@@ -107,18 +150,23 @@ function createPC(socketId, isOffer) {
   };
 
   pc.onaddstream = function (event) {
+    console.log('EVENT PROPRIO', event);
     console.log('onaddstream', event.stream);
     container.setState({info: 'One peer join!'});
 
     const remoteList = container.state.remoteList;
     remoteList[socketId] = event.stream.toURL();
+    console.log(event.stream);
+    console.log('stream to url', remoteList[socketId]);
     container.setState({ remoteList: remoteList });
   };
   pc.onremovestream = function (event) {
     console.log('onremovestream', event.stream);
   };
 
+  console.log(`3`);
   pc.addStream(localStream);
+  console.log(`4`);
   function createDataChannel() {
     if (pc.textDataChannel) {
       return;
@@ -145,67 +193,8 @@ function createPC(socketId, isOffer) {
 
     pc.textDataChannel = dataChannel;
   }
+  console.log('Returning pc');
   return pc;
-}
-
-function exchange(data) {
-  const fromId = data.from;
-  let pc;
-  if (fromId in pcPeers) {
-    pc = pcPeers[fromId];
-  } else {
-    pc = createPC(fromId, false);
-  }
-
-  if (data.sdp) {
-    console.log('exchange sdp', data);
-    pc.setRemoteDescription(new RTCSessionDescription(data.sdp), function () {
-      if (pc.remoteDescription.type == "offer")
-        pc.createAnswer(function(desc) {
-          console.log('createAnswer', desc);
-          pc.setLocalDescription(desc, function () {
-            console.log('setLocalDescription', pc.localDescription);
-            socket.emit('exchange', {'to': fromId, 'sdp': pc.localDescription });
-          }, logError);
-        }, logError);
-    }, logError);
-  } else {
-    console.log('exchange candidate', data);
-    pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-  }
-}
-
-function leave(socketId) {
-  console.log('leave', socketId);
-  const pc = pcPeers[socketId];
-  const viewIndex = pc.viewIndex;
-  pc.close();
-  delete pcPeers[socketId];
-
-  const remoteList = container.state.remoteList;
-  delete remoteList[socketId]
-  container.setState({ remoteList: remoteList });
-  container.setState({info: 'One peer leave!'});
-}
-
-socket.on('exchange', function(data){
-  exchange(data);
-});
-socket.on('leave', function(socketId){
-  leave(socketId);
-});
-
-socket.on('connect', function(data) {
-  console.log('connect');
-  getLocalStream(true, function(stream) {
-    localStream = stream;
-    container.setState({selfViewSrc: stream.toURL()});
-    container.setState({status: 'ready', info: 'Please enter or create room ID'});
-  });
-});
-
-function logError(error) {
-  console.log("logError", error);
 }
 
 function mapHash(hash, func) {
@@ -218,8 +207,10 @@ function mapHash(hash, func) {
 }
 
 function getStats() {
-  const pc = pcPeers[Object.keys(pcPeers)[0]];
-  if (pc.getRemoteStreams && pc.getRemoteStreams()[0] && pc.getRemoteStreams()[0].getAudioTracks()[0]) {
+  return;
+  // const pc = pcPeers[Object.keys(pcPeers)[0]];
+  console.log(pc.get);
+  if (pc.getRemoteStreams()[0] && pc.getRemoteStreams()[0].getAudioTracks()[0]) {
     const track = pc.getRemoteStreams()[0].getAudioTracks()[0];
     console.log('track', track);
     pc.getStats(track, function(report) {
@@ -228,132 +219,100 @@ function getStats() {
   }
 }
 
+let pc;
 let container;
 
-const RCTWebRTCDemo = React.createClass({
-  getInitialState: function() {
-    this.ds = new ListView.DataSource({rowHasChanged: (r1, r2) => true});
-    return {
-      info: 'Initializing',
-      status: 'init',
-      roomID: '',
-      isFront: true,
-      selfViewSrc: null,
-      remoteList: {},
-      textRoomConnected: false,
-      textRoomData: [],
-      textRoomValue: '',
-    };
-  },
-  componentDidMount: function() {
-    container = this;
-  },
-  _press(event) {
-    this.refs.roomID.blur();
-    this.setState({status: 'connect', info: 'Connecting'});
-    join(this.state.roomID);
-  },
-  _switchVideoType() {
-    const isFront = !this.state.isFront;
-    this.setState({isFront});
-    getLocalStream(isFront, function(stream) {
-      if (localStream) {
-        for (const id in pcPeers) {
-          const pc = pcPeers[id];
-          pc && pc.removeStream(localStream);
-        }
-        localStream.release();
-      }
-      localStream = stream;
-      container.setState({selfViewSrc: stream.toURL()});
+class RCTWebRTCDemo extends Component {
+  constructor(props) {
+    super(props);
 
-      for (const id in pcPeers) {
-        const pc = pcPeers[id];
-        pc && pc.addStream(localStream);
+    this.state = {
+      remoteList: [],
+    };
+  }
+
+  componentDidMount() {
+    container = this;
+    console.log(`4Head`);
+    const socket = new WebSocket('wss://rn.blindside-dev.com:8082');
+    socket._send = socket.send;
+    socket.send = (message) => {
+      console.log('Socket sending', message);
+      socket._send(message);
+    }
+    console.log('forehead', socket);
+      socket.onopen = (data) => {
+        getLocalStream(true, function(stream) {
+        localStream = stream;
+      });
+      console.log('Connection Opened');
+      this.sendLoginMessage(socket);
+    };
+
+    socket.onmessage = (m) => {
+      const data = JSON.parse(m.data);
+      console.log('Socket received message', m.data, JSON.parse(m.data));
+      if (data.method === 'verto.answer') {
+        console.log('this is remote sdp', data.params.sdp);
+        let remoteSdp = new RTCSessionDescription(data.params.sdp);
+        console.log(remoteSdp);
+        remoteSdp.type = 'answer';
+        remoteSdp.sdp = data.params.sdp;
+        console.log(`remote`, remoteSdp);
+        pc.setRemoteDescription(remoteSdp,
+          () => {console.log(`Aleluia irmãos`); connected = true},
+          () => console.log('Deu erro', arguments));
+        return;
+      } else if (data.method === 'verto.event') {
+        console.log('I dont know what to do');
+        return;
       }
-    });
-  },
-  receiveTextData(data) {
-    const textRoomData = this.state.textRoomData.slice();
-    textRoomData.push(data);
-    this.setState({textRoomData, textRoomValue: ''});
-  },
-  _textRoomPress() {
-    if (!this.state.textRoomValue) {
-      return
+      if (data.error) {
+        console.error('Socket received messate', data);
+      }
+      const result = data.result;
+      if (result.message === 'logged in') {
+        pc = createPC(socket, result.sessid, true);
+      }
+    };
+  }
+
+  sendLoginMessage(socket) {
+    const message = {
+      "jsonrpc":"2.0",
+      "method":"login",
+      "params": {
+        "login":"bbbuser@rn.blindside-dev.com",
+        "passwd":"secret",
+        "loginParams":{},
+        "userVariables":{},
+        "sessid": `native-${Date.now()}`
+      },
+      "id": 3
     }
-    const textRoomData = this.state.textRoomData.slice();
-    textRoomData.push({user: 'Me', message: this.state.textRoomValue});
-    for (const key in pcPeers) {
-      const pc = pcPeers[key];
-      pc.textDataChannel.send(this.state.textRoomValue);
-    }
-    this.setState({textRoomData, textRoomValue: ''});
-  },
-  _renderTextRoom() {
-    return (
-      <View style={styles.listViewContainer}>
-        <ListView
-          dataSource={this.ds.cloneWithRows(this.state.textRoomData)}
-          renderRow={rowData => <Text>{`${rowData.user}: ${rowData.message}`}</Text>}
-          />
-        <TextInput
-          style={{width: 200, height: 30, borderColor: 'gray', borderWidth: 1}}
-          onChangeText={value => this.setState({textRoomValue: value})}
-          value={this.state.textRoomValue}
-        />
-        <TouchableHighlight
-          onPress={this._textRoomPress}>
-          <Text>Send</Text>
-        </TouchableHighlight>
-      </View>
-    );
-  },
+    socket.send(JSON.stringify(message));
+  }
+
   render() {
 
-    console.log('src', this.state.selfViewSrc);
+    // console.log('src', this.state.selfViewSrc);
     return (
       <View style={styles.container}>
-        <App />
-        <Text style={styles.welcome}>
-          {this.state.info}
-        </Text>
-        {this.state.textRoomConnected && this._renderTextRoom()}
-        <View style={{flexDirection: 'row'}}>
-          <Text>
-            {this.state.isFront ? "Use front camera" : "Use back camera"}
-          </Text>
-          <TouchableHighlight
-            style={{borderWidth: 1, borderColor: 'black'}}
-            onPress={this._switchVideoType}>
-            <Text>Switch camera</Text>
-          </TouchableHighlight>
-        </View>
-        { this.state.status == 'ready' ?
-          (<View>
-            <TextInput
-              ref='roomID'
-              autoCorrect={false}
-              style={{width: 200, height: 40, borderColor: 'gray', borderWidth: 1}}
-              onChangeText={(text) => this.setState({roomID: text})}
-              value={this.state.roomID}
-            />
-            <TouchableHighlight
-              onPress={this._press}>
-              <Text>Enter room</Text>
-            </TouchableHighlight>
-          </View>) : null
-        }
-        <RTCView streamURL={this.state.selfViewSrc} style={styles.selfView}/>
+
         {
           mapHash(this.state.remoteList, function(remote, index) {
-            return <RTCView key={index} streamURL={remote} style={styles.remoteView}/>
+            return (
+              <View>
+                <Text>index: {index} - remote: {remote}</Text>
+                <RTCView key={index} streamURL={remote} style={styles.remoteView}/>
+              </View>
+            )
           })
         }
       </View>
     );
   }
-});
+};
 
 const styles = StyleSheet.create({
   selfView: {
