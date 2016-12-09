@@ -22,9 +22,13 @@ import {
   getUserMedia,
 } from 'react-native-webrtc';
 
-import App from './app/components/App';
+// import App from './app/components/App';
 
-const configuration = {"iceServers": [{"url": "stun:stun.l.google.com:19302"}]};
+const configuration = {"iceServers": [{url:'stun:stun.l.google.com:19302'},
+                                      {url:'stun:stun1.l.google.com:19302'},
+                                      {url:'stun:stun2.l.google.com:19302'},
+                                      {url:'stun:stun3.l.google.com:19302'},
+                                      {url:'stun:stun4.l.google.com:19302'},]};
 
 let pcPeers = {};
 let localStream;
@@ -35,7 +39,7 @@ const logError = (error) => {
 
 const getLocalStream = (isFront, callback) => {
   MediaStreamTrack.getSources(sourceInfos => {
-    console.log(sourceInfos);
+    console.log('These are the sourceInfos XUBIRABIRONG', sourceInfos);
     let videoSourceId;
     for (const i = 0; i < sourceInfos.length; i++) {
       const sourceInfo = sourceInfos[i];
@@ -55,7 +59,7 @@ const getLocalStream = (isFront, callback) => {
         optional: [{ sourceId: sourceInfos.id }]
       }
     }, function (stream) {
-      console.log('dddd', stream);
+      console.log('Getting User Media', stream);
       callback(stream);
     }, logError);
   });
@@ -65,14 +69,14 @@ let candidates = "";
 let candidateTimeout;
 let connected = false;
 const createPC = (socket, socketId, isOffer) => {
+  console.log(`Creating PC`);
   const pc = new RTCPeerConnection(configuration);
-  console.log(`1`);
   pcPeers[socketId] = pc;
-  console.log(`2`);
+  console.log(`PC Created, lets move on`);
 
   pc.onicecandidate = function (event) {
     console.log('onicecandidate', event.candidate);
-    console.log(pc.localDescription);
+    // console.log(pc.localDescription);
     if (event.candidate) {
       candidates = candidates + `a=${event.candidate.candidate}\r\n`;
     }
@@ -81,14 +85,33 @@ const createPC = (socket, socketId, isOffer) => {
   };
 
   function iceCompleted() {
+    const sdp = pc.localDescription.sdp + candidates;
+    console.log('SDP Before', sdp);
+    const tempSdp = sdp.split('a=fmtp:111 minptime=10; useinbandfec=1\r')
+                    .join('a=fmtp:111 minptime=10;useinbandfec=1; stereo=1; sprop-stereo=1\r')
+                    .split('m=video')
+    const hackedSDP = (tempSdp[0] + candidates + 'm=video' + tempSdp[1] + candidates);
+                      // .replace('a=rtpmap:111 opus/48000/2\r\n', 'a=rtpmap:111 opus/16000/1\r\n')
+                      // .replace('a=rtpmap:103 ISAC/16000\r\n', '')
+                      // .replace('a=rtpmap:104 ISAC/32000\r\n', '')
+                      // .replace('a=rtpmap:9 G722/8000\r\n', '')
+                      // .replace('a=rtpmap:102 ILBC/8000\r\n', '')
+                      // .replace('a=rtpmap:0 PCMU/8000\r\n', '')
+                      // .replace('a=rtpmap:8 PCMA/8000\r\n', '')
+                      // .replace('a=rtpmap:106 CN/32000\r\n', '')
+                      // .replace('a=rtpmap:105 CN/16000\r\n', '')
+                      // .replace('a=rtpmap:13 CN/8000\r\n', '')
+                      // .replace('a=rtpmap:127 red/8000\r\n', '')
+                      // .replace('a=rtpmap:126 telephone-event/8000\r\n', '');
+
+    console.log('SDP After', hackedSDP);
     const message = {
       "jsonrpc": "2.0",
       "method": "verto.invite",
       "params": {
-        "sdp": pc.localDescription.sdp + candidates,
+        "sdp": hackedSDP,
         "dialogParams": {
           "useVideo": true,
-          "useStereo": false,
           "screenShare": false,
           "useCamera": "default",
           "useMic": "default",
@@ -97,13 +120,11 @@ const createPC = (socket, socketId, isOffer) => {
           "localTag": null,
           "login": "bbbuser",
           "videoParams": {
-            "minFrameRate": 15
+            "minFrameRate": 5
           },
         "destination_number": "71234-DESKSHARE",
         "caller_id_name": "Test",
         "caller_id_number": "a@b.c",
-        "outgoingBandwidth": 1302,
-        "incomingBandwidth": 630,
         "dedEnc": false,
         "mirrorInput": false,
         "callID": `xubirabirovovski-${Date.now()}`,
@@ -137,9 +158,9 @@ const createPC = (socket, socketId, isOffer) => {
   pc.oniceconnectionstatechange = function(event) {
     console.log('oniceconnectionstatechange', event.target.iceConnectionState);
     if (event.target.iceConnectionState === 'completed') {
-      setTimeout(() => {
+      setInterval(() => {
         getStats();
-      }, 1000);
+      }, 500);
     }
     if (event.target.iceConnectionState === 'connected') {
       createDataChannel();
@@ -164,9 +185,9 @@ const createPC = (socket, socketId, isOffer) => {
     console.log('onremovestream', event.stream);
   };
 
-  console.log(`3`);
+  console.log(`Adding localStream`);
   pc.addStream(localStream);
-  console.log(`4`);
+  console.log(`Added localStream`);
   function createDataChannel() {
     if (pc.textDataChannel) {
       return;
@@ -207,14 +228,45 @@ function mapHash(hash, func) {
 }
 
 function getStats() {
-  return;
-  // const pc = pcPeers[Object.keys(pcPeers)[0]];
-  console.log(pc.get);
-  if (pc.getRemoteStreams()[0] && pc.getRemoteStreams()[0].getAudioTracks()[0]) {
-    const track = pc.getRemoteStreams()[0].getAudioTracks()[0];
-    console.log('track', track);
-    pc.getStats(track, function(report) {
-      console.log('getStats report', report);
+  console.log(`---------------------HERE COMES THE INFO-----------------------------`);
+//   console.log(` HERE COMES THE INFORMATION TRUCK
+//         .--------------.
+//         |~            ~|
+//         |H____________H|
+//         |.------------.|
+//         ||::..     __ ||
+//         |'--------'--''|
+//         | '. ______ .' |
+//         | _ |======| _ |
+//         |(_)|======|(_)|
+//         |___|======|___|
+//         [______________]
+//         |##|        |##|
+//         '""'        '""
+// `)
+  // console.log(pcPeers, Object.keys(pcPeers), pcPeers[Object.keys(pcPeers)[0]]);
+  const thisPC = pcPeers[Object.keys(pcPeers)[0]];
+  // console.log('getStats', thisPC.get);
+
+  // console.log(thisPC.getStats, thisPC.getRemoteStreams);
+  // thisPC.getStats(track, function(report) {
+  //   console.log('getStats report', report);
+  // }, logError);
+
+  if (thisPC._remoteStreams[0] && thisPC._remoteStreams[0]._tracks[0]) {
+    const track = thisPC._remoteStreams[0]._tracks[0];
+    // console.log('track', track);
+    thisPC.getStats(track, function(report) {
+      // console.log('Reports', report);
+      let mappedObj = {};
+      report.forEach(r => {
+        r.values.forEach(value => {
+          const key = Object.keys(value)[0];
+          console.log(`STAT: ${key}: ${value[key]}`);
+          mappedObj[key] = value[key];
+        });
+      });
+      container.setState({ stats: mappedObj });
     }, logError);
   }
 }
@@ -228,20 +280,22 @@ class RCTWebRTCDemo extends Component {
 
     this.state = {
       remoteList: [],
+      stats: {},
     };
   }
 
   componentDidMount() {
     container = this;
-    console.log(`4Head`);
+    console.log(`Component Did Mount`);
     const socket = new WebSocket('wss://rn.blindside-dev.com:8082');
     socket._send = socket.send;
     socket.send = (message) => {
       console.log('Socket sending', message);
       socket._send(message);
     }
-    console.log('forehead', socket);
+    console.log('This is the socket', socket);
       socket.onopen = (data) => {
+        console.log('Socket Connection Opened');
         getLocalStream(true, function(stream) {
         localStream = stream;
       });
@@ -260,11 +314,11 @@ class RCTWebRTCDemo extends Component {
         remoteSdp.sdp = data.params.sdp;
         console.log(`remote`, remoteSdp);
         pc.setRemoteDescription(remoteSdp,
-          () => {console.log(`Aleluia irmãos`); connected = true},
-          () => console.log('Deu erro', arguments));
+          () => {console.log(`Remote SDP Set`); connected = true},
+          () => console.log('Error Setting Remote SDP', arguments));
         return;
       } else if (data.method === 'verto.event') {
-        console.log('I dont know what to do');
+        console.log('I dont know what to do with this message, but its ok');
         return;
       }
       if (data.error) {
@@ -294,21 +348,25 @@ class RCTWebRTCDemo extends Component {
   }
 
   render() {
+    const info = [<Text key={'info-123'}>Info:</Text>];
 
-    // console.log('src', this.state.selfViewSrc);
+    Object.keys(this.state.stats).forEach(a => {
+      info.push(<Text key={a}>{a} {this.state.stats[a]}</Text>);
+    });
+
     return (
       <View style={styles.container}>
-
         {
           mapHash(this.state.remoteList, function(remote, index) {
             return (
-              <View>
+              <View key={index}>
                 <Text>index: {index} - remote: {remote}</Text>
                 <RTCView key={index} streamURL={remote} style={styles.remoteView}/>
               </View>
             )
           })
         }
+        {info}
       </View>
     );
   }
