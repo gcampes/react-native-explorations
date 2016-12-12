@@ -16,13 +16,13 @@ import {
   RTCPeerConnection,
   RTCMediaStream,
   RTCIceCandidate,
-  RTCSessionDescription,
   RTCView,
   MediaStreamTrack,
   getUserMedia,
 } from 'react-native-webrtc';
 
 // import App from './app/components/App';
+import SocketHandler from './src/socket-handler.js';
 
 const configuration = {"iceServers": [{url:'stun:stun.l.google.com:19302'},
                                       {url:'stun:stun1.l.google.com:19302'},
@@ -158,9 +158,9 @@ const createPC = (socket, socketId, isOffer) => {
   pc.oniceconnectionstatechange = function(event) {
     console.log('oniceconnectionstatechange', event.target.iceConnectionState);
     if (event.target.iceConnectionState === 'completed') {
-      setInterval(() => {
-        getStats();
-      }, 500);
+      // setInterval(() => {
+      //   getStats();
+      // }, 500);
     }
     if (event.target.iceConnectionState === 'connected') {
       createDataChannel();
@@ -304,30 +304,7 @@ class RCTWebRTCDemo extends Component {
     };
 
     socket.onmessage = (m) => {
-      const data = JSON.parse(m.data);
-      console.log('Socket received message', m.data, JSON.parse(m.data));
-      if (data.method === 'verto.answer') {
-        console.log('this is remote sdp', data.params.sdp);
-        let remoteSdp = new RTCSessionDescription(data.params.sdp);
-        console.log(remoteSdp);
-        remoteSdp.type = 'answer';
-        remoteSdp.sdp = data.params.sdp;
-        console.log(`remote`, remoteSdp);
-        pc.setRemoteDescription(remoteSdp,
-          () => {console.log(`Remote SDP Set`); connected = true},
-          () => console.log('Error Setting Remote SDP', arguments));
-        return;
-      } else if (data.method === 'verto.event') {
-        console.log('I dont know what to do with this message, but its ok');
-        return;
-      }
-      if (data.error) {
-        console.error('Socket received messate', data);
-      }
-      const result = data.result;
-      if (result.message === 'logged in') {
-        pc = createPC(socket, result.sessid, true);
-      }
+      SocketHandler.handleMessage(m, {pc, createPC, socket})
     };
   }
 
